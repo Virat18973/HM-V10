@@ -430,10 +430,32 @@ def page_optimise(sns=None):
 
 
 # ------------------------------------------------------------------------------------------ what each condition costs
+def _verdict(v):
+    """One plain word for a hot metal change in Rs per tHM (the loop's own noise is about Rs 50)."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return "Not measured"
+    if v < -50:
+        return "Saves money"
+    if v > 50:
+        return "Makes it dearer"
+    return "No effect" if abs(v) < 0.5 else "Within noise"
+
+
 def page_conditions(sns=None):
     _init()
     st.markdown("<h1>What each condition costs</h1><div class='sub'>Relax ONE rule at a time, everything else as set, and see what it would be worth in hot metal cost. "
                 "It prices the rules; it does not tell you which are safe to relax.</div>", unsafe_allow_html=True)
+    with st.expander("How to read this page", expanded=True):
+        st.markdown(
+            "<div class='small' style='line-height:1.65'>"
+            "<b>What it does.</b> Your sinter model has rules (basicity 1.9&ndash;2.0, MgO 2.2&ndash;2.4, SiO2 at most 5.8 and so on). Each row below loosens <b>one</b> rule by the Amount shown, "
+            "re-runs the sinter and furnace models, and reports what happens to the cost of one tonne of hot metal. Everything else stays as it is.<br>"
+            "<b>The number that matters.</b> <i>Hot metal change Rs/tHM</i>: <b>negative</b> = relaxing the rule makes hot metal cheaper; <b>positive</b> = dearer; "
+            "<b>about zero</b> = your recipe never touches that limit, so loosening it changes nothing. Anything within &plusmn;50 is the loop's own noise.<br>"
+            "<b>Why it can come out dearer.</b> The sinter model picks the recipe that is cheapest for the <i>sinter plant</i>, not for the furnace. When a rule is wider it may switch to a different recipe "
+            "(look at the sinter price and chemistry columns), and that recipe can cost the furnace more.<br>"
+            "<b>Verdict column.</b> <i>No effect</i>, <i>Within noise</i>, <i>Saves money</i> (more than Rs 50 cheaper) or <i>Makes it dearer</i> (more than Rs 50 dearer)."
+            "</div>", unsafe_allow_html=True)
     run = _need_run()
     if not run:
         return
@@ -467,12 +489,18 @@ def page_conditions(sns=None):
                                 f"{len(good)} condition(s) are worth more than Rs 50 per tHM; the rest cost nothing measurable here."), unsafe_allow_html=True)
     else:
         st.markdown(alert("check", "No single condition is worth more than Rs 50 per tHM to relax on these inputs: the recipe is set by stock and price, not by the rules."), unsafe_allow_html=True)
+    worse = tbl[tbl[col] > 50]
+    if len(worse):
+        st.markdown(alert("check", "Relaxing <b>" + ", ".join(worse["Condition"]) + "</b> raises the hot metal cost: with the wider rule the sinter model chooses a different recipe, "
+                                   "cheapest for the sinter plant but dearer for the furnace. Keep these rules as they are."), unsafe_allow_html=True)
     d = tbl.dropna(subset=[col]).iloc[::-1]
     fig = go.Figure(go.Bar(x=d[col], y=d["Condition"], orientation="h", marker_color=[DOWN if v < -50 else (UP if v > 50 else PALETTE["grey2"]) for v in d[col]]))
     fig.update_layout(height=max(280, 34 * len(d)), margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       font=dict(color=PALETTE["text"]), xaxis=dict(title="Change in hot metal cost, Rs per tHM (negative = relaxing it saves money)", gridcolor=PALETTE["line"]))
     st.plotly_chart(fig, key="imp_cond_fig", **PLOT_W)
-    st.dataframe(tbl.round(2), hide_index=True, **W)
+    shown = tbl.round(2).copy()
+    shown.insert(2, "Verdict", [_verdict(v) for v in tbl[col]])
+    st.dataframe(shown, hide_index=True, **W)
     st.caption("Each row is a quick run (0.5 % tolerance), so differences of about Rs 50 per tHM or less are noise. Relaxing a rule only shows the price of keeping it: a spec the furnace or the sinter plant really needs stays. "
                "Your sinter tolerances are placeholders except SiO2 6.2, so a saving that depends on one of them needs the plant's confirmation. The sinter's chemistry columns show what it becomes when that rule is relaxed.")
 
